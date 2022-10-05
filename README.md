@@ -2,7 +2,14 @@
 
 ## Guidelines - you can delete this section before submission
 
-This repository is a stub for your final project. Fork it, develop your project, and submit it as a pull request. Edit/ delete the text in this readme as needed.
+This is a stub for your final project. Edit/ delete the text in this readme as needed.
+
+There are two ways you can use this document:  
+- You can download this file to a folder on your computer, edit this document and add other files (data, code, etc), and then zip up and submit the folder on canvas.
+- You can for the [repository](finalproject) containing this document on gitub. Then commit and push your canges to the repository, and submit a link to the repository on canvas.
+
+Github is a great way to work on projects, but also has a steep initial learning curve.
+
 
 Some guidelines and tips:
 
@@ -15,8 +22,6 @@ Some guidelines and tips:
 - If you are working with unpublished data that you would prefer not to publicly share at this time, please contact me to discuss options. In most cases, the data can be anonymized in a way that putting them in a public repo does not compromise your other goals.
 
 - Paste references (including urls) into the reference section, and cite them with the general format (Smith at al. 2003).
-
-- Commit and push often as you work.
 
 OK, here we go.
 
