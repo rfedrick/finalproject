@@ -1,13 +1,5 @@
 # Phylogenetic Biology - Raymond's Final Project
 
-## Guidelines - you can delete this section before submission
-
-This is a stub for your final project. Edit/ delete the text in this readme as needed.
-
-There are two ways you can use this document:  
-- You can download this file to a folder on your computer, edit this document and add other files (data, code, etc), and then zip up and submit the folder on canvas.
-- You can for the [repository](finalproject) containing this document on gitub. Then commit and push your canges to the repository, and submit a link to the repository on canvas.
-
 #  Genome Evolution and Karyotype in Amphibians
 
 ## Introduction and Goals
