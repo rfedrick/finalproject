@@ -60,12 +60,14 @@ BAMM:
 
 MBASR: 
   Ancestral state reconstruction within the MBASR framework predicted an ancestral diploid number of 26 when run for both the Pyron (Figure 3) and Hime (Figure 4) phylogenies. 57 branches in the Pyron phylogeny were identified to have potential karyotype changes (12 in salamanders, 45 outside of salamanders), and 30 such branches (7 in salamanders, 23 outside of salamanders) were identified in the Pyron phylogeny.
-[Figure 3(pyron.MBASR).pdf](https://github.com/rfedrick/finalproject/files/10242473/Figure.3.pyron.MBASR.pdf)
-[Figure 4 (hime.MBASR).pdf](https://github.com/rfedrick/finalproject/files/10242475/Figure.4.hime.MBASR.pdf)
+![Figure 3(pyron MBASR)](https://user-images.githubusercontent.com/120404559/208017218-640d9b8b-6e05-4c3f-a078-fd9ab2e6a7d8.png)
+![Figure 4 (hime MBASR)](https://user-images.githubusercontent.com/120404559/208017226-45aae6fd-bca2-43ce-8875-c952506353c8.png)
+
 
 ANOVA: 
   Interestingly, the ANOVA and Krukskal-Wallis tests between branches with and without predicted karyotype change both found that the Hime phylogeny (Figure 5A) showed no signs of karyotype impacting the rates of genome size evolution (p > .8), whereas the larger Pyron phylogeny (Figure 5B) returned a highly significant p-value (ANOVA: p = 0.000109; Krukskal-Wallis: p = 7.97e-06) from both tests, which would suggested the rate of genome size evolution was greater in branches that were predicted to have experienced karyotype change compared to those predicted not to. 
-  [Figure 5.pdf](https://github.com/rfedrick/finalproject/files/10242478/Figure.5.pdf)
+![Figure 5](https://user-images.githubusercontent.com/120404559/208017235-977989ff-b63e-4825-8ac6-09a211f8b492.png)
+
 
 Alternate_universe ANOVA: 
 After the noticing the distribution of rates returned by the BAMM analysis of the Hime phylogeny only including salamanders looked very different from the other three runs, I ran the exact same protocol to generate a second set of BAMM results for the Hime phylogeny only including salamanders. This time, the distribution of rates matched what was seen on the other three runs, and when added together with the rates from Hime phylogeny without salamanders. This resulted in a p value just under .05 (ANOVA: p = 0.0361; Krukskal-Wallis: p = 0.04332), now agreeing with the results of the ANOVA on the Pyron phylogeny that suggested the rate of genome size evolution was greater in branches that were predicted to have experienced karyotype change. 
