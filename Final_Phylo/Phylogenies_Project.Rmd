@@ -1,0 +1,862 @@
+---
+title: "Project testing"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Question: Does variation in karyotype accelerate the rate of change of Genome size?
+
+```{r}
+library(pdftools)
+library(ggplot2)
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(ape)
+library(phangorn)
+library(phytools)
+library(adephylo)
+```
+# Data wrangling
+```{r}
+#All to get data from pdf to r
+# download pdf
+raw_text <-purrr::map("41559_2018_674_MOESM1_ESM.pdf", pdftools::pdf_text)
+
+raw_text <- purrr::map(raw_text, ~ str_split(.x, "\\n") %>% unlist())
+  # Concatenate the split pages
+  raw_text <- reduce(raw_text, c)
+  raw2 <- as.data.frame(raw_text)
+#remove back-to-back " 's"
+sum <- 0
+ repeat {
+     raw2$raw_text <- gsub('            ', ' ', raw2$raw_text)
+     raw2$raw_text <- gsub('    ', ' ', raw2$raw_text)
+     raw2$raw_text <- gsub('  ', ' ', raw2$raw_text)
+     sum <- sum + 1
+if(sum == 3) {
+break
+}
+
+ }
+raw2$raw_text <- gsub('^ ', '', raw2$raw_text)
+
+#Separate each statistic into its own column
+  rawX <- separate(raw2, col=raw_text, into=c("Genus", "Species", "Order", "Family", "n", "Mean", "Median", "SD", "Min.", "Max.","Source"), sep = " ")
+#Remove now jumbled header 
+rawX <- rawX[-c(1:9), ]
+#Remove blank rows
+cVal<- rawX[!is.na(rawX$Order), ]
+#combine species and genus
+cVal$Species <- paste0(cVal$Genus, " ", cVal$Species)
+hist(as.numeric(cVal$Mean), breaks = 50, xlab = "C-value", col = "orange", main = "Histogram of C-value")
+hist(log(as.numeric(cVal$Mean)), breaks = 50, xlab = "Log(C-value)", col = "purple", main = "Histogram of Log(C-value)")
+cVal$logC <- log(as.numeric(cVal$Mean))
+#It might be worth log-transforming these values
+```
+
+```{r}
+karyo <- read.csv("amphib_2022_10_29.csv")
+dim(karyo)
+#Remove duplicate entries for same species
+#   -note: this could be done more empirically (should make sure none of the duplicates conflict)
+karyo <- karyo[!duplicated(karyo$Species), ]
+#I know there's a better way, or at least a way to check if two of the same species have different karyotypes reported: karyo[duplicated(karyo$Species), "Species"]
+
+#Merge dataframes, keeping only shared taxa
+joint <- dplyr::inner_join(cVal, karyo, by = c("Species", "Order", "Family"))
+joint <- joint[, c("Species", "Genus", "Family", "Order", "Mean", "Median", "Diploid.number", "Fundamental.number", "logC")]
+```
+
+```{r}
+#joint <- polyploid species
+#Reading in data from Hime et al
+#For Future, load in phylogenies first, then use tipnode labels directly to select species represented in both phylogenies
+taxa <- read.csv("taxa.csv")
+taxa$Species <- paste0(taxa$Genus, " ", taxa$Species)
+#Merge dataframes, keeping only shared taxa
+phyloDat <- dplyr::inner_join(joint, taxa, by = c("Species"))
+#Remove duplicated columns
+phyloDat <- phyloDat[, !(colnames(phyloDat) %in% c("Genus.y", "Genus.x", "Family.x", "Order.x", "AHE_ID", "Institution", "Order.y", "Family.y", "ID"))]
+phyloDat <- phyloDat[-50, ]
+```
+# Loading in Phylogenies THIS CHUNK IS NOW OUT OF DATE BECAUSE IT DOESN'T YET SPLIT OFF CAUDATA
+```{r fig.width=5, fig.height=10}
+phyloDat$temp <- paste0(phyloDat$Species, "  ", phyloDat$Mean)
+#Phylo from Pyron 2014
+phy <- read.tree("amph_shl_dates_trim.tre")
+phyloDat$Species <- gsub(" ", "_", phyloDat$Species)
+#Drop all tips not represented in dataset
+noKeep <- phy$tip.label[! phy$tip.label %in% phyloDat$Species]
+phy_reduced = drop.tip(phy, noKeep)
+
+
+#Load in more recent phylogeny 
+phy2 <- read.tree("HimePhy.tre")
+str(phy2)
+
+#which tips are in phy reduced are in phy reduced 2
+noKeep <- phy2$tip.label[! phy2$tip.label %in% phy_reduced$tip.label]
+phy_reduced2 = drop.tip(phy2, noKeep)
+#Drop the one tip not shared between phy reduced and phy reduced 2
+phy_reduced <- drop.tip(phy_reduced, phy_reduced$tip.label[!phy_reduced$tip.label %in% phy_reduced2$tip.label])
+str(phy_reduced)
+#Directly comparable dataset created
+
+#Make sure they're ultrametric
+is.ultrametric(phy_reduced)
+is.ultrametric(phy_reduced2)
+#Should already be ultrametric, so force R to recognize that
+phy_reduced2 <- force.ultrametric(phy_reduced2, method = "extend")
+
+#create .tre files for newly reduced phylogenies
+#write.tree(phy_reduced, file = "reduced.tre")
+#write.tree(phy_reduced2, file = "reduced2.tre")
+
+plot(phy_reduced)
+# Now to check min branch length:
+min(phy_reduced$edge.length)
+
+plot(phy_reduced2)
+is.ultrametric(phy_reduced2)
+min(phy_reduced2$edge.length)
+
+```
+
+```{r}
+#Remove tips not included in reduced phylogeny
+amphib <- phyloDat[phyloDat$Species %in% phy_reduced$tip.label, ] 
+amphib$logC <- paste0(amphib$Species, "  ", amphib$logC)
+#write.table(amphib$temp, file = "amphib$temp.txt")
+#write.table(amphib$logC, file = "amphib$log.txt")
+```
+# BAMM
+```{r}
+#Setting up BAMM
+library(BAMMtools)
+#setBAMMpriors(phy = phy_reduced, traits = "amphib$temp.txt", outfile = "pyronPrior.txt")
+#setBAMMpriors(phy = phy_reduced, traits = "amphib$log.txt", outfile = "logPyronPrior.txt")
+
+#set up BAMM priors
+#setBAMMpriors(phy = phy_reduced2, traits = "amphib$temp.txt", outfile = "HimePrior.txt")
+#setBAMMpriors(phy = phy_reduced2, traits = "amphib$log.txt", outfile = "logHimePrior.txt")
+```
+
+```{r fig.width=5, fig.height=16}
+#Full run w/ both phylogenies
+joint$Species <- gsub(" ", "_", joint$Species)
+#Drop all tips not represented in dataset
+noKeep <- phy$tip.label[! phy$tip.label %in% joint$Species]
+full = drop.tip(phy, noKeep)
+#distRoot(full)
+noKeep <- phy_reduced2$tip.label[! phy_reduced2$tip.label %in% joint$Species]
+full2 = drop.tip(phy_reduced2, noKeep)
+is.ultrametric(full)
+is.ultrametric(full2)
+full <- force.ultrametric(full, method = "extend")
+full2 <- force.ultrametric(full2, method = "extend")
+#Convert branch length to millions of years for Hime phylogeny
+full2$edge.length <- full2$edge.length*1000.1525656456
+#distRoot(full2)
+
+
+
+#Files created for BAMM before I realized I needed to analyze Caudata seperately to account for jump on caudatan stem
+#write.table(sub$Cbamm, file = "sub$Cbamm.txt")
+#write.table(sub2$Cbamm, file = "sub2$Cbamm.txt")
+#write.tree(full, file = "pyron.tre")
+#write.tree(full2, file = "hime.tre")
+
+#setBAMMpriors(phy = full, traits = "sub$Cbamm.txt", outfile = "FullpyronPrior.txt")
+#setBAMMpriors(phy = full2, traits = "sub2$Cbamm.txt", outfile = "FullHimePrior.txt")
+
+#Building out analysis for Caudata and others separate
+sally <- getMRCA(full, c("Andrias_japonicus", "Plethodon_jordani"))
+yes <- getDescendants(full, sally)
+sallys <- keep.tip(full, yes)
+#plot(sallys)
+noSally <- drop.tip(full, yes)
+write.tree(sallys, file = "pyron_mander.tre")
+write.tree(noSally, file = "pyron_nomander.tre")
+
+sally <- getMRCA(full2, c("Andrias_japonicus", "Plethodon_jordani"))
+yes <- getDescendants(full2, sally)
+sallys2 <- keep.tip(full2, yes)
+noSally2 <- drop.tip(full2, yes)
+write.tree(sallys2, file = "hime_mander.tre")
+write.tree(noSally2, file = "hime_nomander.tre")
+
+#Create files needed for BAMM
+joint$Cbamm <- paste0(joint$Species, "  ", joint$logC)
+subMan <- joint[joint$Species %in% sallys$tip.label, ]
+subNo <- joint[joint$Species %in% noSally$tip.label, ]
+subMan2 <- joint[joint$Species %in% sallys2$tip.label, ]
+subNo2 <- joint[joint$Species %in% noSally2$tip.label, ]
+
+#write.table(subMan$Cbamm, file = "subMan$Cbamm.txt")
+#write.table(subNo$Cbamm, file = "subNo$Cbamm.txt")
+#write.table(subMan2$Cbamm, file = "subMan2$Cbamm.txt")
+#write.table(subNo2$Cbamm, file = "subNo2$Cbamm.txt")
+
+setBAMMpriors(phy = sallys, traits = "subMan$Cbamm.txt", outfile = "FullpyronPrior_mander.txt")
+setBAMMpriors(phy = noSally, traits = "subNo$Cbamm.txt", outfile = "FullpyronPrior_nomander.txt")
+
+setBAMMpriors(phy = sallys2, traits = "subMan2$Cbamm.txt", outfile = "FullHimePrior_mander.txt")
+setBAMMpriors(phy = noSally2, traits = "subNo2$Cbamm.txt", outfile = "FullHimePrior_nomander.txt")
+```
+
+# BAMM results for all individuals for which I have both Karyotype and C-value
+```{r}
+setwd("/Users/raymondfedrick/Desktop/Final_Phylo/MCMCex")
+
+## Syntax used throughout code below
+#    -P = Pyron Phylogeny without salamanders
+#    -PM = Pyron Phylogeny only including salamanders
+#    -H = Hime Phylogeny without salamanders
+#    -HM = Hime Phylogeny only including salamanders
+
+mcmcoutP <- read.csv("mcmc_outP.txt", header=T)
+plot(mcmcoutP$logLik ~ mcmcoutP$generation)
+mcmcoutPM <- read.csv("mcmc_outPM.txt", header=T)
+plot(mcmcoutPM$logLik ~ mcmcoutPM$generation)
+
+mcmcoutH <- read.csv("mcmc_outH.txt", header=T)
+plot(mcmcoutH$logLik ~ mcmcoutH$generation)
+mcmcoutHM <- read.csv("mcmc_outHM.txt", header=T)
+plot(mcmcoutHM$logLik ~ mcmcoutHM$generation)
+
+burnstartP <- floor(0.25 * nrow(mcmcoutP))
+postburnP <- mcmcoutP[burnstartP:nrow(mcmcoutP), ]
+burnstartPM <- floor(0.25 * nrow(mcmcoutPM))
+postburnPM <- mcmcoutPM[burnstartPM:nrow(mcmcoutPM), ]
+
+burnstartH <- floor(0.25 * nrow(mcmcoutH))
+postburnH <- mcmcoutH[burnstartH:nrow(mcmcoutH), ]
+burnstartHM <- floor(0.25 * nrow(mcmcoutHM))
+postburnHM <- mcmcoutHM[burnstartHM:nrow(mcmcoutHM), ]
+
+post_probsP <- table(postburnP$N_shifts) / nrow(postburnP)
+names(post_probsP)
+plotPrior("mcmc_outP.txt", expectedNumberOfShifts = 1)
+post_probsPM <- table(postburnPM$N_shifts) / nrow(postburnPM)
+names(post_probsPM)
+plotPrior("mcmc_outPM.txt", expectedNumberOfShifts = 1)
+
+post_probsH <- table(postburnH$N_shifts) / nrow(postburnH)
+names(post_probsH)
+plotPrior("mcmc_outH.txt", expectedNumberOfShifts = 1)
+post_probsHM <- table(postburnHM$N_shifts) / nrow(postburnHM)
+names(post_probsHM)
+plotPrior("mcmc_outHM.txt", expectedNumberOfShifts = 1)
+```
+
+```{r fig.width=15, fig.height=15}
+setwd("/Users/raymondfedrick/Desktop/Final_Phylo/MCMCex")
+#computeBayesFactors("event_dataP.txt", expectedNumberOfShifts=1, burnin=0.25)
+bammedP <- getEventData(noSally, "event_dataP.txt", burnin = 0.25, type = "trait")
+plot.bammdata(bammedP, lwd=2, labels = TRUE, legend = TRUE, method = "polar")
+bammedPM <- getEventData(sallys, "event_dataPM.txt", burnin = 0.25, type = "trait")
+plot.bammdata(bammedPM, lwd=2, labels = TRUE, legend = TRUE, method = "polar")
+
+bammedH <- getEventData(noSally2, "event_dataH.txt", burnin = 0.25, type = "trait")
+plot.bammdata(bammedH, lwd=2, labels = TRUE, legend = TRUE)
+bammedHM <- getEventData(sallys2, "event_dataHM.txt", burnin = 0.25, type = "trait")
+plot.bammdata(bammedHM, lwd=2, labels = TRUE, legend = TRUE)
+```
+
+```{r, fig.width=8, fig.height=8}
+#Data for rates in individual branches
+allratesP <- getMeanBranchLengthTree(bammedP, rate = "trait")
+allratesPM <- getMeanBranchLengthTree(bammedPM, rate = "trait")
+
+allratesH <- getMeanBranchLengthTree(bammedH, rate = "trait")
+allratesHM <- getMeanBranchLengthTree(bammedHM, rate = "trait")
+
+#Characterizing rate data
+hist(allratesP$phy$edge.length, breaks = 50, main = "Pyron rates without Salamanders", xlab = "C- value evolutionary rate", col = "dark green")
+hist(allratesPM$phy$edge.length, breaks = 50, main = "Pyron rates with Salamanders", xlab = "C- value evolutionary rate", col = "orange")
+hist(allratesH$phy$edge.length, breaks = 50, main = "Hime rates without Salamanders", xlab = "C- value evolutionary rate", col = "brown")
+hist(allratesHM$phy$edge.length, breaks = 50, main = "Hime rates with Salamanders", xlab = "C- value evolutionary rate", col = "yellow")
+
+plot(allratesH$phy)
+plot(allratesHM$phy)
+```
+
+## Identifying Branches with predicted karyotype change
+```{r, fig.width=8, fig.height=8, warning = FALSE}
+#Hime phylo, Salamanders only
+#For edges connecting to tip nodes
+nums <- match(c("Andrias_japonicus", "Siren_intermedia", "Notophthalmus_viridescens", "Rhyacotriton_olympicus", "Nyctanolis_pernix"), allratesHM$phy$tip.label)
+kEdgesHM <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgesHM[i] <- allratesHM$phy$edge.length[allratesHM$phy$edge[,2] == nums[i]]
+}
+#For edges one node deeper than the tip
+nums <- match("Necturus_maculosus", allratesHM$phy$tip.label)
+kEdgeHMtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgeHMtemp[i] <- allratesHM$phy$edge[allratesHM$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgeHMtemp[i] <- allratesHM$phy$edge.length[allratesHM$phy$edge[,2] == kEdgeHMtemp[i]]
+}
+kEdgesHM <- c(kEdgesHM, kEdgeHMtemp)
+#Edges two nodes deeper than the tip
+nums <- match("Salamandrina_terdigitata", allratesHM$phy$tip.label)
+kEdgeHMtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgeHMtemp[i] <- allratesHM$phy$edge[allratesHM$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgeHMtemp[i] <- allratesHM$phy$edge[allratesHM$phy$edge[,2] == kEdgeHMtemp[i]]
+}
+kEdgeHMtemp
+for (i in 1:length(nums)) {
+  kEdgeHMtemp[i] <- allratesHM$phy$edge.length[allratesHM$phy$edge[,2] == kEdgeHMtemp[i]]
+}
+kEdgesHM <- c(kEdgesHM, kEdgeHMtemp)
+
+noEdgesHM <- allratesHM$phy$edge.length[!allratesHM$phy$edge.length %in% kEdgesHM]
+
+#Hime phylogeny, without salamanders
+#For edges connecting to tip nodes
+nums <- match(c("Cardioglossa_leucomystax", "Astylosternus_diadematus", "Microhyla_ornata", "Plethodontohyla_notosticta", "Sooglossus_sechellensis", "Odontophrynus_occidentalis", "Pleurodema_bibroni", "Batrachyla_taeniata", "Limnodynastes_dumerilii", "Hymenochirus_boettgeri", "Rhinophrynus_dorsalis", "Alytes_obstetricans", "Geotrypetes_seraphini", "Grandisonia_alternans", "Boulengerula_taitana"), allratesH$phy$tip.label)
+kEdgesH <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgesH[i] <- allratesH$phy$edge.length[allratesH$phy$edge[,2] == nums[i]]
+}
+#For edges one node deeper than the tip
+nums <- match(c("Pyxicephalus_adspersus", "Dermatonotus_muelleri", "Spea_hammondii", "Pipa_pipa", "Discoglossus_pictus", "Leiopelma_hochstetteri", "Gymnopis_multiplicata", "Boulengerula_taitana"), allratesH$phy$tip.label)
+kEdgeHtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgeHtemp[i] <- allratesH$phy$edge[allratesH$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgeHtemp[i] <- allratesH$phy$edge.length[allratesH$phy$edge[,2] == kEdgeHtemp[i]]
+}
+kEdgesH <- c(kEdgesH, kEdgeHtemp)
+
+noEdgesH <- allratesH$phy$edge.length[!allratesH$phy$edge.length %in% kEdgesH]
+
+#Pyron No Manders
+#For edges connecting to tip nodes
+nums <- match(c("Dendrobates_tinctorius", "Allophryne_ruthveni", "Adenomera_hylaedactyla", "Pseudacris_brimleyi", "Dendropsophus_nanus", "Batrachyla_taeniata", "Zachaenus_parvulus", "Ceratophrys_ornata", "Eleutherodactylus_planirostris", "Eleutherodactylus_heminota", "Eleutherodactylus_abbotti", "Eleutherodactylus_martinicensis", "Eleutherodactylus_richmondi", "Mantidactylus_biporus", "Phrynobatrachus_natalensis", "Astylosternus_diadematus", "Xenopus_vestitus", "Xenopus_ruwenzoriensis", "Hymenochirus_boettgeri", "Pipa_pipa", "Rhinophrynus_dorsalis", "Ascaphus_truei", "Gegeneophis_ramaswamii", "Schistometopum_gregorii", "Geotrypetes_seraphini", "Chthonerpeton_indistinctum", "Boulengerula_taitana"), allratesP$phy$tip.label)
+kEdgesP <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgesP[i] <- allratesP$phy$edge.length[allratesP$phy$edge[,2] == nums[i]]
+}
+#For edges one node deeper than the tip
+nums <- match(c("Nimbaphrynoides_occidentalis", "Acris_crepitans", "Litoria_bicolor", "Limnodynastes_dumerilii", "Mantidactylus_curtus", "Rana_chensinensis", "Gastrophryne_carolinensis", "Hemisus_marmoratus", "Arthroleptis_stenodactylus", "Alytes_cisternasii", "Bombina_variegata", "Leiopelma_hochstetteri"), allratesP$phy$tip.label)
+kEdgePtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge[allratesP$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge.length[allratesP$phy$edge[,2] == kEdgePtemp[i]]
+}
+kEdgesP <- c(kEdgesP, kEdgePtemp)
+#For edges two nodes deeper than the tip
+nums <- match(c("Pseudopaludicola_mystacalis", "Proceratophrys_boiei", "Eleutherodactylus_richmondi", "Xenopus_ruwenzoriensis", "Discoglossus_jeanneae"), allratesP$phy$tip.label)
+kEdgePtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge[allratesP$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge[allratesP$phy$edge[,2] == kEdgePtemp[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge.length[allratesP$phy$edge[,2] == kEdgePtemp[i]]
+}
+kEdgesP <- c(kEdgesP, kEdgePtemp)
+#For edges three nodes deeper than the tip
+nums <- match(c("Crinia_signifera"), allratesP$phy$tip.label)
+kEdgePtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge[allratesP$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge[allratesP$phy$edge[,2] == kEdgePtemp[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge[allratesP$phy$edge[,2] == kEdgePtemp[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePtemp[i] <- allratesP$phy$edge.length[allratesP$phy$edge[,2] == kEdgePtemp[i]]
+}
+kEdgesP <- c(kEdgesP, kEdgePtemp)
+
+noEdgesP <- allratesP$phy$edge.length[!allratesP$phy$edge.length %in% kEdgesP]
+
+#Pyron Salamanders only
+#For edges connecting to tip nodes
+nums <- match(c("Rhyacotriton_olympicus", "Ambystoma_texanum", "Ambystoma_laterale", "Hynobius_retardatus"), allratesPM$phy$tip.label)
+kEdgesPM <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgesPM[i] <- allratesPM$phy$edge.length[allratesPM$phy$edge[,2] == nums[i]]
+}
+#For edges one node deeper than the tip
+nums <- match(c("Batrachoseps_attenuatus", "Proteus_anguinus", "Taricha_rivularis", "Salamandrina_terdigitata", "Pseudobranchus_striatus", "Onychodactylus_fischeri", "Cryptobranchus_alleganiensis"), allratesPM$phy$tip.label)
+kEdgePMtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgePMtemp[i] <- allratesPM$phy$edge[allratesPM$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePMtemp[i] <- allratesPM$phy$edge.length[allratesPM$phy$edge[,2] == kEdgePMtemp[i]]
+}
+kEdgesPM <- c(kEdgesPM, kEdgePMtemp)
+#For edges two nodes deeper than the tip
+nums <- match(c("Cryptobranchus_alleganiensis"), allratesPM$phy$tip.label)
+kEdgePMtemp <- rep(NA, length(nums))
+for (i in 1:length(nums)) {
+  kEdgePMtemp[i] <- allratesPM$phy$edge[allratesPM$phy$edge[,2] == nums[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePMtemp[i] <- allratesPM$phy$edge[allratesPM$phy$edge[,2] == kEdgePMtemp[i]]
+}
+for (i in 1:length(nums)) {
+  kEdgePMtemp[i] <- allratesPM$phy$edge.length[allratesPM$phy$edge[,2] == kEdgePMtemp[i]]
+}
+kEdgesPM <- c(kEdgesPM, kEdgePMtemp)
+
+noEdgesPM <- allratesPM$phy$edge.length[!allratesPM$phy$edge.length %in% kEdgesPM]
+```
+
+## Plotting Genome size evolution rates by predicted karyotype change
+```{r, fig.width=8, fig.height=8}
+
+## Refresher on syntax used throughout code below
+#    -P = Pyron Phylogeny without salamanders
+#    -PM = Pyron Phylogeny only including salamanders
+#    -H = Hime Phylogeny without salamanders
+#    -HM = Hime Phylogeny only including salamanders
+
+library(ggplot2)
+dfPM <- data.frame(Karyotype = n<-c(rep("Karyo Change", length(kEdgesPM)), rep("No Change", length(noEdgesPM))), Rate = c(kEdgesPM, noEdgesPM))
+ggplot(dfPM, aes(x = Karyotype, y = Rate)) +            
+  geom_boxplot(fill = c("red", 4), color = "black") +
+  ggtitle("C-Value Evolutionary rates by Karyotype change", subtitle = "Pyron Phylogeny only Salamanders")
+
+dfP <- data.frame(Karyotype = n<-c(rep("Karyo Change", length(kEdgesP)), rep("No Change", length(noEdgesP))), Rate = c(kEdgesP, noEdgesP))
+ggplot(dfP, aes(x = Karyotype, y = Rate)) +            
+  geom_boxplot(fill = c("red", 4), color = "black") +
+  ggtitle("C-Value Evolutionary rates by Karyotype change", subtitle = "Pyron Phylogeny without salamanders")
+
+dfHM <- data.frame(Karyotype = n<-c(rep("Karyo Change", length(kEdgesHM)), rep("No Change", length(noEdgesHM))), Rate = c(kEdgesHM, noEdgesHM))
+ggplot(dfHM, aes(x = Karyotype, y = Rate)) +            
+  geom_boxplot(fill = c("red", 4), color = "black") +
+  labs(title = "C-Value Evolutionary rates by Karyotype change", subtitle = "Hime Phylogeny only Salamanders")
+
+dfH <- data.frame(Karyotype = n<-c(rep("Karyo Change", length(kEdgesH)), rep("No Change", length(noEdgesH))), Rate = c(kEdgesH, noEdgesH))
+ggplot(dfH, aes(x = Karyotype, y = Rate)) +            
+  geom_boxplot(fill = c("red", 4), color = "black") +
+  labs(title = "C-Value Evolutionary rates by Karyotype change", subtitle = "Hime Phylogeny without salamanders")
+
+dfPf <- rbind(dfP, dfPM)
+ggplot(dfPf, aes(x = Karyotype, y = Rate)) +            
+  geom_boxplot(fill = c("red", 4), color = "black") +
+  ggtitle("C-Value Evolutionary rates by Karyotype change in Full Pyron Phylogeny")
+
+dfHf <- rbind(dfH, dfHM)
+ggplot(dfHf, aes(x = Karyotype, y = Rate)) +            
+  geom_boxplot(fill = c("red", 4), color = "black") +
+  labs(title = "C-Value Evolutionary rates by Karyotype change in Full Hime Phylogeny")
+
+
+#NOW DO ANOVA
+#It occurs to me that anova assumes normal distributions, and these rates really aren't normally distributed
+#Kruskal Wallis test to correct for non-normality of the data
+anPM <- aov(Rate ~ Karyotype, data = dfPM)
+summary(anPM)
+kruskal.test(Rate ~ Karyotype, data = dfPM)
+anP <- aov(Rate ~ Karyotype, data = dfP)
+summary(anP)
+kruskal.test(Rate ~ Karyotype, data = dfP)
+anHM <- aov(Rate ~ Karyotype, data = dfHM)
+summary(anHM)
+kruskal.test(Rate ~ Karyotype, data = dfHM)
+anH <- aov(Rate ~ Karyotype, data = dfH)
+summary(anH)
+kruskal.test(Rate ~ Karyotype, data = dfH)
+
+#Concatanating Salamander rates with rates from the rest of amphibia
+anPf <- aov(Rate ~ Karyotype, data = dfPf)
+summary(anPf)
+#Additional non-parametric test to account for non-normality of the data
+kruskal.test(Rate ~ Karyotype, data = dfPf)
+
+anHf <- aov(Rate ~ Karyotype, data = dfHf)
+summary(anHf)
+#Additional non-parametric test to account for non-normality of the data
+kruskal.test(Rate ~ Karyotype, data = dfHf)
+
+#Mean of Pyron phylogeny with significant effect of karyotype change
+mean(tempk <- c(kEdgesPM, kEdgesP))
+mean(tempk <- c(noEdgesPM, noEdgesP))
+
+
+#Median of Pyron phylogeny with significant effect of karyotype change
+median(tempk <- c(kEdgesPM, kEdgesP))
+median(tempk <- c(noEdgesPM, noEdgesP))
+
+```
+
+
+
+
+
+Real question: are the branches which are predicted to have experienced changes in karyotype evolving faster than those where karyotype is epected to have remained constant
+```
+
+
+
+#Code using MrBayes to reconstruct ancestral state
+```{r, eval = FALSE}
+#Create files needed for MRBASR
+joint$Kar <- paste0(joint$Species, "  ", joint$Diploid.number)
+himeKar <- joint[joint$Species %in% full2$tip.label, ]
+pyronKar <- joint[joint$Species %in% full$tip.label, ]
+sort(unique(himeKar$Diploid.number))
+sort(unique(pyronKar$Diploid.number))
+table(himeKar$Diploid.number)
+table(pyronKar$Diploid.number)
+
+#Limited to 6 sequential bins, so must group 10 and 26 karyotypes repsectively into 6 bins :()
+#Hime
+#0 - 18+22
+#1 - 24
+#2 -26
+#3 - 28
+#4 - 34+38
+#5 - 46, 54, 60
+
+#Pyron
+#0- 14, 16, 18, 20, 22
+#1 - 24
+#2 -26
+#3 - 28
+#4 - 30, 32, 34, 36, 38, 40
+#5 -42, 44, 46, 48, 52, 56, 60, 66, 72, 78, 108
+#write.table(himeKar$Kar, file = "himeKar.txt")
+#write.table(pyronKar$Kar, file = "pyronKar.txt")
+
+# Assign this path and use it to set the R working directory
+MBASR.directory="/Users/raymondfedrick/Desktop/MBASR"
+setwd(MBASR.directory)
+
+
+# Load this source file
+source("MBASR.load.functions.R")
+
+#Hime Run
+# Set these file names
+file.name.tree="hime.nwk"
+file.name.trait.data="himeFake.txt"
+file.name.plot.settings="plot.settings.1.txt"
+
+# Set these analysis parameters
+character.type="ordered"
+n.samples=1000
+
+# Run the analysis
+MBASR(file.name.tree, file.name.trait.data, file.name.plot.settings, character.type, n.samples)
+
+#Pyron Run
+# Set these file names
+file.name.tree="pyron.nwk"
+file.name.trait.data="pyronFake.txt"
+file.name.plot.settings="plot.settings.2.txt"
+
+# Set these analysis parameters
+character.type="ordered"
+n.samples=1000
+
+# Run the analysis
+MBASR(file.name.tree, file.name.trait.data, file.name.plot.settings, character.type, n.samples)
+
+
+# Optional -- Replot the ASR result, after editing the plot settings file
+plot.tree.with.pie.charts.custom <- function(file.name.tree,file.name.trait.data,file.name.plot.settings) {
+
+##########
+
+file.name.asr="MrBayes.ASR.results.txt"
+
+###
+
+source(file.name.plot.settings)
+
+my.tip.label.offset=my.tip.label.shift.right
+my.tip.pie.offset=my.tip.pie.shift.right
+
+###
+
+suppressWarnings(suppressMessages(library(ape)))
+library(ape)
+
+suppressWarnings(suppressMessages(library(phytools)))
+library(phytools)
+
+###
+
+tree=read.tree(file.name.tree)
+
+n_tips=length(tree$tip.label)
+n_nodes=tree$Nnode
+root_node_number=n_tips+1
+last_node=root_node_number+n_nodes-1
+node_numbers=seq(from=root_node_number,to=last_node,by=1)
+
+tree$node.label=node_numbers
+
+###
+
+BLs.orig=tree$edge.length
+n.edges=length(BLs.orig)
+mean.BL=mean(BLs.orig)
+
+scaling.factor=1
+if(mean.BL<0.1) { scaling.factor=100 }
+if(mean.BL<0.01) { scaling.factor=1000 }
+if(mean.BL<0.001) { scaling.factor=10000 }
+if(mean.BL<0.0001) { scaling.factor=100000 }
+if(mean.BL<0.00001) { scaling.factor=1000000 }
+if(mean.BL<0.000001) { scaling.factor=10000000 }
+
+BLs.scaled=BLs.orig*scaling.factor
+tree$edge.length[1:n.edges]=BLs.scaled
+
+###
+
+ASR_table=read.table(file.name.asr,sep="\t")
+ASR_table=as.matrix(ASR_table)
+rownames(ASR_table)=ASR_table[,1]
+ASR_table=ASR_table[,-1]
+mode(ASR_table)="numeric"
+colnames(ASR_table)=NULL
+
+###
+
+tip_data=read.table(file.name.trait.data,sep="\t")
+tip_data=as.matrix(tip_data)
+colnames(tip_data)=NULL
+rownames(tip_data)=tip_data[,1]
+tip_data=as.matrix(tip_data[,-1])
+colnames(tip_data)="state"
+
+xyz=strsplit(tip_data[,1],"")
+xyz=unlist(xyz)
+options(warn=-1)
+mode(xyz)="numeric"
+options(warn=0)
+max_state=max(xyz,na.rm=T)
+
+first_state=0
+all_states=seq(from=first_state,to=max_state,by=1)
+n_states=length(all_states)
+
+needed_rows=dim(tip_data)[1]
+needed_cols=length(all_states)
+
+state_names=c("14-22", "24", "26", "28", "30-40", "40+")
+state_names=paste("Diploid number ",state_names,sep="")
+
+###
+
+c0="darkblue"
+c1="royalblue1"
+c2="turquoise"
+c3="yellow"
+c4="orange"
+c5="red"
+c6="purple"
+c7="magenta"
+c8="gray60"
+c9="gray90"
+my.colors=c(c0,c1,c2,c3,c4,c5,c6,c7,c8,c9)
+
+my.colors=my.colors[1:n_states]
+
+##########
+
+tips_matrix=matrix(0,nrow=needed_rows,ncol=needed_cols)
+rownames(tips_matrix)=rownames(tip_data)
+
+current_taxon=1
+repeat {
+current_score=tip_data[current_taxon,1]
+test_and=grep("&",current_score)
+
+if(length(test_and)>0) {
+current_score=strsplit(current_score,"&")
+current_score=unlist(current_score)
+options(warn=-1)
+mode(current_score)="numeric"
+options(warn=0)
+destination_columns=current_score+1
+current_strength=1/length(current_score)
+round(current_strength,digits=3)
+tips_matrix[current_taxon,destination_columns]=current_strength
+}
+
+if(length(test_and)==0) {
+options(warn=-1)
+mode(current_score)="numeric"
+options(warn=0)
+destination_columns=current_score+1
+current_strength=1
+tips_matrix[current_taxon,destination_columns]=current_strength
+}
+
+current_taxon=current_taxon+1
+if(current_taxon==needed_rows+1) break }
+
+###
+
+Qs=which(tip_data=="?")
+if(length(Qs)>0) {
+tips_matrix[Qs,1:needed_cols]="?"
+}
+
+#tips_matrix
+
+##########
+
+tips_list_correct_order=tree$tip.label
+tips_list_incorrect_order=rownames(tips_matrix)
+my_match=match(tips_list_incorrect_order,tips_list_correct_order)
+
+temp_matrix=cbind(tips_matrix,tips_list_correct_order)
+temp_dim=dim(temp_matrix)
+temp_cols=temp_dim[2]
+
+abc=colnames(temp_matrix)
+abc[temp_cols]="correct_seq"
+colnames(temp_matrix)=abc
+
+temp_matrix[,temp_cols]=my_match
+options(warn=-1)
+mode(temp_matrix)="numeric"
+options(warn=0)
+
+temp_matrix=as.matrix(temp_matrix[order(temp_matrix[,temp_cols]),])
+
+dim_again=dim(tips_matrix)
+cols_again=dim_again[2]
+rows_again=dim_again[1]
+
+tips_matrix[1:rows_again,1:cols_again]=temp_matrix[1:rows_again,1:cols_again]
+options(warn=-1)
+mode(tips_matrix)="numeric"
+options(warn=0)
+
+###
+
+pdf(file="tree.plot.pdf",width=my.plot.width,height=my.plot.height)
+
+if(show.node.numbers==FALSE) {
+plot.phylo(tree,direction="rightwards",no.margin=TRUE,cex=my.tip.label.font.size,label.offset=my.tip.label.offset,edge.width=my.tree.edge.width,underscore=T)
+}
+tt
+if(show.node.numbers==TRUE) {
+plot.phylo(tree,direction="rightwards",no.margin=TRUE,cex=my.tip.label.font.size,label.offset=my.tip.label.offset,edge.width=my.tree.edge.width,underscore=T,show.node.label=T)
+}
+
+par(lwd=my.node.pie.border.width)
+nodelabels(pie=ASR_table,cex=my.node.pie.size,piecol=my.colors)
+
+par(lwd=my.tip.pie.border.width)
+tiplabels(pie=tips_matrix,cex=my.tip.pie.size,adj=my.tip.pie.offset,piecol=my.colors)
+
+legend(x=0,y=my.legend.shift.up,legend=state_names,box.col="white",title="Legend:", title.adj = -.05,cex=my.legend.size,fill=my.colors,horiz=T)
+
+#
+
+if(show.time.scale==TRUE) {
+
+all.dist.nodes=dist.nodes(tree)
+root.dist.nodes=all.dist.nodes[,root_node_number]
+root.tips.dists=root.dist.nodes[1:n_tips]
+root.age=max(root.tips.dists)
+
+my.time.scale.n.ticks=10
+
+one.tick.size=root.age/(my.time.scale.n.ticks-1)
+scale.seq=seq(from=0,to=root.age,by=one.tick.size)
+
+scale.seq.2=pretty(scale.seq,n=my.time.scale.n.ticks)
+new.seq.length=length(scale.seq.2)
+scale.seq.2[new.seq.length]=root.age
+
+tick.labels=rev(scale.seq.2)
+short.int=tick.labels[1]-tick.labels[2]
+norm.int=tick.labels[2]-tick.labels[3]
+adj.val=norm.int-short.int
+
+scale.seq.3=scale.seq.2-adj.val
+scale.seq.3[1]=scale.seq.2[1]
+scale.seq.3[new.seq.length]=scale.seq.2[new.seq.length]
+
+lastPP <- get("last_plot.phylo", envir = .PlotPhyloEnv)
+xscale <- range(lastPP$xx)
+tscale <- c(0,root.age)
+beta <- diff(xscale)/diff(tscale)
+alpha <- xscale[1] - beta * tscale[1]
+ticks.at=beta*scale.seq.3+alpha
+
+tick.labels[1]=NA
+
+tick.labels=tick.labels+my.time.scale.youngest.tip
+#tick.labels=round(tick.labels,digits=my.time.scale.label.n.digits)
+
+tick.labels=tick.labels/scaling.factor
+
+starting.options=options()
+starting.scipen=starting.options$scipen
+options(scipen=999)
+
+axis(side=1,pos=my.time.scale.bar.shift.up,at=ticks.at,labels=tick.labels,cex.axis=my.tip.label.font.size,lwd=my.tree.edge.width,padj=-1*my.time.scale.label.shift.up,tcl=-0.1)
+
+options(scipen=starting.scipen)
+
+}
+#
+
+if(show.edge.transitions==TRUE) {
+
+multiplier=state.decision.multiplier
+file.name.asr.results="MrBayes.ASR.results.txt"
+tips.nodes.table=make.tips.nodes.table(file.name.trait.data,file.name.tree,file.name.asr.results,multiplier)
+edge.transition.table=make.edge.transition.table(file.name.tree,tips.nodes.table)
+edge.transition.table[,4]=edge.transition.table[,4]+my.time.scale.youngest.tip
+edge.transition.table[,5]=edge.transition.table[,5]+my.time.scale.youngest.tip
+my.edge.labels=edge.transition.table[,8]
+
+my.edge.transitions.shift.up=my.edge.transitions.shift.up*-1
+edgelabels(my.edge.labels,frame="none",cex=my.edge.transitions.font.size,adj=c(my.edge.transitions.shift.left,my.edge.transitions.shift.up),col="#888888")
+}
+
+#
+
+dev.off()
+
+##########
+
+msg="Tree plot was written to file."
+msg=noquote(msg)
+
+###
+
+return(msg) }
+
+#Create customized tree
+plot.tree.with.pie.charts.custom(file.name.tree,file.name.trait.data,file.name.plot.settings)
+```
+
+
+
+
+
+
